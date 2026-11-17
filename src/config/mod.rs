@@ -22,6 +22,8 @@ pub struct Config {
     pub allowed_origins: Vec<HeaderValue>,
     pub jwt_secret: String,
     pub jwt_expiration_minutes: i64,
+    pub admin_email: Option<String>,
+    pub admin_password: Option<String>,
 }
 
 impl Config {
@@ -44,6 +46,15 @@ impl Config {
             });
         }
 
+        let admin_email = optional("ADMIN_EMAIL");
+        let admin_password = optional("ADMIN_PASSWORD");
+        if admin_email.is_some() != admin_password.is_some() {
+            return Err(ConfigError::Invalid {
+                name: "ADMIN_EMAIL",
+                reason: "ADMIN_EMAIL and ADMIN_PASSWORD must be set together".into(),
+            });
+        }
+
         Ok(Self {
             database_url: required("DATABASE_URL")?,
             db_max_connections: parsed("DB_MAX_CONNECTIONS", 10)?,
@@ -52,6 +63,8 @@ impl Config {
             allowed_origins: parse_origins(&required("FRONTEND_URL")?)?,
             jwt_secret,
             jwt_expiration_minutes,
+            admin_email,
+            admin_password,
         })
     }
 }
@@ -61,6 +74,10 @@ fn required(name: &'static str) -> Result<String, ConfigError> {
         Ok(v) if !v.trim().is_empty() => Ok(v),
         _ => Err(ConfigError::Missing(name)),
     }
+}
+
+fn optional(name: &'static str) -> Option<String> {
+    env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
 fn parsed<T>(name: &'static str, default: T) -> Result<T, ConfigError>

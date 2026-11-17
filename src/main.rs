@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cms_backend::{config::Config, db, routes, state::AppState};
+use cms_backend::{config::Config, db, routes, services, state::AppState};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -27,6 +27,16 @@ async fn main() -> anyhow::Result<()> {
         .context("database migration failed; refusing to start")?;
 
     let state = AppState::new(pool.clone(), config);
+
+    if let (Some(email), Some(pw)) = (&state.config.admin_email, &state.config.admin_password) {
+        let created = services::auth::bootstrap_admin(&state.pool, email, pw)
+            .await
+            .context("failed to bootstrap initial admin")?;
+        if created {
+            tracing::info!("initial admin account created");
+        }
+    }
+
     let app = routes::router(state);
 
     let listener = TcpListener::bind(&addr)
