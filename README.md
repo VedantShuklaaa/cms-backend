@@ -46,6 +46,16 @@ curl http://127.0.0.1:8080/api/v1/health
 Success: `{ "success": true, "message": "...", "data": {} }`
 Error: `{ "success": false, "message": "...", "error": "..." }`
 
+## API specification
+
+`openapi.yaml` documents every endpoint, request body, response envelope and schema. Generate frontend types from it rather than writing them by hand:
+
+```bash
+npx openapi-typescript openapi.yaml -o src/types/api.ts
+```
+
+The file at the repo root can also be opened in Swagger UI or Redoc. Keep it in sync when routes or payloads change.
+
 ## Config
 
 See `.env.example`. `FRONTEND_URL` is a comma-separated list of allowed CORS origins (no wildcards).
@@ -111,7 +121,8 @@ See `.env.example`. `FRONTEND_URL` is a comma-separated list of allowed CORS ori
 
 ## Subjects
 
-* `GET /api/v1/subjects`, `GET /api/v1/subjects/{id}`: any authenticated user. Filters: `search` (name, code), `course_id`, `department_id`, `semester`; `include_inactive` for admins.
+* `GET /api/v1/subjects`, `GET /api/v1/subjects/{id}`: any authenticated user. Filters: `search` (name, code), `course_id`, `department_id`, `semester`, `faculty_id` (subjects assigned to that faculty member); `include_inactive` for admins.
+* `GET /api/v1/subjects/mine`: faculty and students only. Faculty get their assigned subjects; students get the active subjects in their course for their current semester. Supports `search` and pagination. Admins get 403.
 * `POST /api/v1/subjects`, `PUT /api/v1/subjects/{id}`, `DELETE /{id}`: admin only. Body: `course_id`, `name`, `code`, `semester`, `credits` (1 to 10), `description`; PUT also accepts `is_active`.
 * Codes are uppercased and unique. A name is unique within its course. `semester` must fit the course's `duration_semesters`, and the course must be active.
 * Faculty assignment:

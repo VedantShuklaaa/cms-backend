@@ -49,7 +49,16 @@ pub struct SubjectListQuery {
     pub course_id: Option<Uuid>,
     pub department_id: Option<Uuid>,
     pub semester: Option<i16>,
+    /// Restrict to subjects assigned to this faculty member.
+    pub faculty_id: Option<Uuid>,
     pub include_inactive: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MySubjectQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

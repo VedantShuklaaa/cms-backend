@@ -6,8 +6,8 @@ use crate::{
     models::{
         auth::AuthUser,
         subject::{
-            AssignFacultyRequest, CreateSubjectRequest, Subject, SubjectFaculty, SubjectListQuery,
-            UpdateSubjectRequest,
+            AssignFacultyRequest, CreateSubjectRequest, MySubjectQuery, Subject, SubjectFaculty,
+            SubjectListQuery, UpdateSubjectRequest,
         },
     },
     services::subjects as svc,
@@ -26,6 +26,15 @@ pub async fn list(
 ) -> AppResult<Json<ApiResponse<Paginated<Subject>>>> {
     let data = svc::list(&state, &auth, &q).await?;
     Ok(Json(ApiResponse::ok("Subjects retrieved", data)))
+}
+
+pub async fn mine(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ApiQuery(q): ApiQuery<MySubjectQuery>,
+) -> AppResult<Json<ApiResponse<Paginated<Subject>>>> {
+    let data = svc::mine(&state, &auth, &q).await?;
+    Ok(Json(ApiResponse::ok("Your subjects retrieved", data)))
 }
 
 pub async fn get_one(

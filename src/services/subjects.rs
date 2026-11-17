@@ -3,15 +3,16 @@ use uuid::Uuid;
 
 use crate::{
     errors::{AppError, AppResult, conflict_on_unique},
+    middleware::rbac::ensure_role,
     models::{
         auth::AuthUser,
         subject::{
-            AssignFacultyRequest, CreateSubjectRequest, Subject, SubjectFaculty, SubjectListQuery,
-            UpdateSubjectRequest,
+            AssignFacultyRequest, CreateSubjectRequest, MySubjectQuery, Subject, SubjectFaculty,
+            SubjectListQuery, UpdateSubjectRequest,
         },
         user::Role,
     },
-    services::lookups,
+    services::{lookups, students as student_svc},
     state::AppState,
     utils::{
         query::{Paginated, Pagination, like_pattern},
@@ -67,7 +68,11 @@ pub async fn list(
         AND ($2::uuid IS NULL OR s.course_id = $2)
         AND ($3::uuid IS NULL OR c.department_id = $3)
         AND ($4::smallint IS NULL OR s.semester = $4)
-        AND ($5::text IS NULL OR s.name ILIKE $5 OR s.code ILIKE $5)";
+        AND ($5::text IS NULL OR s.name ILIKE $5 OR s.code ILIKE $5)
+        AND ($6::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM faculty_subjects fs
+            WHERE fs.faculty_id = $6 AND fs.subject_id = s.id
+        ))";
 
     let total: i64 = sqlx::query_scalar(&format!(
         "SELECT COUNT(*) FROM subjects s
@@ -78,23 +83,98 @@ pub async fn list(
     .bind(q.department_id)
     .bind(q.semester)
     .bind(&search)
+    .bind(q.faculty_id)
     .fetch_one(&state.pool)
     .await?;
 
     let items = sqlx::query_as::<_, Subject>(&format!(
-        "{SELECT} {FILTER} ORDER BY s.semester, s.name LIMIT $6 OFFSET $7"
+        "{SELECT} {FILTER} ORDER BY s.semester, s.name LIMIT $7 OFFSET $8"
     ))
     .bind(include_inactive)
     .bind(q.course_id)
     .bind(q.department_id)
     .bind(q.semester)
     .bind(&search)
+    .bind(q.faculty_id)
     .bind(p.limit())
     .bind(p.offset())
     .fetch_all(&state.pool)
     .await?;
 
     Ok(Paginated::new(items, total, p))
+}
+
+/// Subjects tied to the caller: assigned subjects for faculty, the current
+/// semester's subjects for students.
+pub async fn mine(
+    state: &AppState,
+    auth: &AuthUser,
+    q: &MySubjectQuery,
+) -> AppResult<Paginated<Subject>> {
+    ensure_role(auth, &[Role::Faculty, Role::Student])?;
+    let p = Pagination::new(q.page, q.per_page);
+    let search = like_pattern(q.search.as_deref());
+
+    match auth.role {
+        Role::Faculty => {
+            let faculty_id = lookups::faculty_id_for_user(&state.pool, auth.id).await?;
+            const FILTER: &str = "WHERE s.is_active
+                AND fs.faculty_id = $1
+                AND ($2::text IS NULL OR s.name ILIKE $2 OR s.code ILIKE $2)";
+
+            let total: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM subjects s
+                 JOIN faculty_subjects fs ON fs.subject_id = s.id {FILTER}"
+            ))
+            .bind(faculty_id)
+            .bind(&search)
+            .fetch_one(&state.pool)
+            .await?;
+
+            let items = sqlx::query_as::<_, Subject>(&format!(
+                "{SELECT} JOIN faculty_subjects fs ON fs.subject_id = s.id
+                 {FILTER} ORDER BY s.semester, s.name LIMIT $3 OFFSET $4"
+            ))
+            .bind(faculty_id)
+            .bind(&search)
+            .bind(p.limit())
+            .bind(p.offset())
+            .fetch_all(&state.pool)
+            .await?;
+
+            Ok(Paginated::new(items, total, p))
+        }
+        Role::Student => {
+            let student = student_svc::fetch_by_user(&state.pool, auth.id).await?;
+            const FILTER: &str = "WHERE s.is_active
+                AND s.course_id = $1
+                AND s.semester = $2
+                AND ($3::text IS NULL OR s.name ILIKE $3 OR s.code ILIKE $3)";
+
+            let total: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM subjects s {FILTER}"))
+                    .bind(student.course_id)
+                    .bind(student.current_semester)
+                    .bind(&search)
+                    .fetch_one(&state.pool)
+                    .await?;
+
+            let items = sqlx::query_as::<_, Subject>(&format!(
+                "{SELECT} {FILTER} ORDER BY s.name LIMIT $4 OFFSET $5"
+            ))
+            .bind(student.course_id)
+            .bind(student.current_semester)
+            .bind(&search)
+            .bind(p.limit())
+            .bind(p.offset())
+            .fetch_all(&state.pool)
+            .await?;
+
+            Ok(Paginated::new(items, total, p))
+        }
+        // ensure_role above guarantees this is unreachable.
+        Role::Admin => unreachable!("ensure_role rejects admins"),
+    }
 }
 
 pub async fn get(state: &AppState, auth: &AuthUser, id: Uuid) -> AppResult<Subject> {
