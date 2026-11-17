@@ -1,7 +1,9 @@
 pub mod auth;
 pub mod courses;
 pub mod departments;
+pub mod faculty;
 pub mod health;
+pub mod students;
 
 use axum::Router;
 use tower_http::trace::TraceLayer;
@@ -25,6 +27,8 @@ fn api_routes(state: &AppState) -> Router<AppState> {
         .merge(auth::routes(state))
         .merge(departments::routes(state))
         .merge(courses::routes(state))
+        .merge(faculty::routes(state))
+        .merge(students::routes(state))
 }
 
 async fn not_found() -> AppError {
