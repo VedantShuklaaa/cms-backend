@@ -6,7 +6,8 @@ College Management System API. Rust, Axum, SQLx, PostgreSQL.
 
 * \[x] Phase 1: config, Postgres (Docker), auto-migrations, server, CORS, health, errors, auth, RBAC
 * \[x] Phase 2 / Step 1: shared helpers, departments, courses
-* \[ ] Phase 2: faculty, subjects, students, attendance, exams/results, notices, fees, assignments, reports
+* \[x] Phase 2 / Step 2: faculty and students, with account creation and ownership checks
+* \[ ] Phase 2 / Remaining: subjects, attendance, exams/results, notices, fees, assignments, reports
 * \[ ] Phase 3: Next.js frontend
 
 ## Local setup
@@ -65,7 +66,7 @@ See `.env.example`. `FRONTEND_URL` is a comma-separated list of allowed CORS ori
 * `middleware::auth::require_auth` authenticates; handlers receive `AuthUser`.
 * `middleware::rbac::{admin_only, staff_only}` guard route groups; `ensure_role()` is for service-level checks.
 * Add `require_auth` as the LAST `route_layer` so it runs before the role layer.
-* Ownership checks (student sees only own data, faculty only assigned subjects) live in services, per feature.
+* Ownership checks (students see only their own record, faculty only their own profile) live in services, per feature.
 
 ## Shared API conventions
 
@@ -83,3 +84,25 @@ See `.env.example`. `FRONTEND_URL` is a comma-separated list of allowed CORS ori
 * `GET /api/v1/courses`, `GET /api/v1/courses/{id}`: any authenticated user. Filters: `search`, `department_id`.
 * `POST`, `PUT /{id}`, `DELETE /{id}`: admin only. Body: `department_id`, `name`, `code`, `duration_semesters` (1 to 12), `description`.
 * Codes are uppercased and unique. Courses must belong to an active department.
+
+## Faculty
+
+* `GET /api/v1/faculty`, `POST /api/v1/faculty`: admin only. List filters: `search` (name, employee\_id, email), `department_id`, `include_inactive`.
+* `GET /api/v1/faculty/me`: the signed-in faculty member's own profile.
+* `GET /api/v1/faculty/{id}`: admin, or a faculty member for their own record.
+* `PUT /api/v1/faculty/{id}`, `DELETE /{id}`: admin only. PUT is a partial update and also accepts `is_active`.
+* Create body: `email`, `password`, `department_id`, `employee_id`, `first_name`, `last_name`, `designation`; optional `phone`, `joined_on`.
+* The user account and faculty profile are created in one transaction. Email and employee\_id are unique; the department must be active.
+* DELETE deactivates the linked user account; the profile row is kept.
+
+## Students
+
+* `GET /api/v1/students`: admin and faculty. Filters: `search` (name, enrollment\_no, email), `department_id`, `course_id`, `semester`, `include_inactive` (admin only).
+* `POST /api/v1/students`: admin only.
+* `GET /api/v1/students/me`: the signed-in student's own profile.
+* `GET /api/v1/students/{id}`: admin and faculty, or a student for their own record.
+* `PUT /api/v1/students/{id}`, `DELETE /{id}`: admin only. PUT is a partial update and also accepts `is_active`.
+* Create body: `email`, `password`, `course_id`, `enrollment_no`, `first_name`, `last_name`, `current_semester`, `admission_year`; optional `phone`, `date_of_birth`.
+* `current_semester` must fit the course's `duration_semesters`; `admission_year` must be 1950 through next year; `date_of_birth` must be in the past.
+* The course must be active. The account and profile are created in one transaction. Email and enrollment\_no are unique.
+* DELETE deactivates the linked user account; the profile row is kept.
