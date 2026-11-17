@@ -96,3 +96,9 @@ fn internal() -> (StatusCode, &'static str, String) {
         "An unexpected error occurred".to_string(),
     )
 }
+
+impl From<axum::extract::rejection::JsonRejection> for AppError {
+    fn from(r: axum::extract::rejection::JsonRejection) -> Self {
+        AppError::BadRequest(r.body_text())
+    }
+}
