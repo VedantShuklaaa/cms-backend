@@ -1,5 +1,12 @@
+pub mod assignments;
+pub mod attendance;
 pub mod auth;
 pub mod courses;
 pub mod departments;
+pub mod exams;
 pub mod faculty;
+pub mod fees;
+pub mod notices;
+pub mod reports;
 pub mod students;
+pub mod subjects;
