@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod courses;
+pub mod departments;
 pub mod health;
 
 use axum::Router;
@@ -21,6 +23,8 @@ fn api_routes(state: &AppState) -> Router<AppState> {
     Router::new()
         .merge(health::routes())
         .merge(auth::routes(state))
+        .merge(departments::routes(state))
+        .merge(courses::routes(state))
 }
 
 async fn not_found() -> AppError {

@@ -102,3 +102,23 @@ impl From<axum::extract::rejection::JsonRejection> for AppError {
         AppError::BadRequest(r.body_text())
     }
 }
+
+impl From<axum::extract::rejection::QueryRejection> for AppError {
+    fn from(r: axum::extract::rejection::QueryRejection) -> Self {
+        AppError::BadRequest(r.body_text())
+    }
+}
+
+impl From<axum::extract::rejection::PathRejection> for AppError {
+    fn from(r: axum::extract::rejection::PathRejection) -> Self {
+        AppError::BadRequest(r.body_text())
+    }
+}
+
+/// Maps a unique-constraint violation to a specific 409 message; everything else uses the default mapping.
+pub fn conflict_on_unique(e: sqlx::Error, msg: &str) -> AppError {
+    match &e {
+        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::Conflict(msg.into()),
+        _ => e.into(),
+    }
+}

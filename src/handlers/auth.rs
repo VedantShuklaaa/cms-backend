@@ -63,9 +63,3 @@ pub async fn change_password(
         login_response(result),
     )))
 }
-
-/// Temporary RBAC probe. Remove in Phase 2.
-pub async fn admin_ping(auth: AuthUser) -> Json<ApiResponse<()>> {
-    tracing::debug!(user = %auth.id, "admin ping");
-    Json(ApiResponse::ok("Admin access confirmed", ()))
-}
