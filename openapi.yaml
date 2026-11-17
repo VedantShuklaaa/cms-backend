@@ -1,0 +1,4395 @@
+openapi: 3.0.3
+info:
+  title: CMS Backend API
+  version: 0.1.0
+  description: |
+    College Management System API (Rust, Axum, PostgreSQL).
+
+    All private endpoints require `Authorization: Bearer <token>` from
+    `POST /auth/login`. Responses use one of two envelopes:
+
+    * Success: `{ "success": true, "message": "...", "data": ... }`
+    * Error: `{ "success": false, "message": "...", "error": "..." }`
+
+    List endpoints are paginated with `page` (default 1) and `per_page`
+    (default 20, max 100). DELETEs are soft deactivations and return 200.
+
+    Roles: `ADMIN`, `FACULTY`, `STUDENT`. Service-level ownership rules are
+    noted per operation. Validation failures return 422.
+servers:
+  - url: http://127.0.0.1:8080/api/v1
+    description: Local development
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+    description: Unauthenticated service and database status.
+  - name: Auth
+    description: Login, logout and the current user's account.
+  - name: Departments
+    description: Academic departments. Reads are open to all authenticated users; writes are admin only.
+  - name: Courses
+    description: Courses offered by departments. Reads are open to all authenticated users; writes are admin only.
+  - name: Subjects
+    description: Subjects, per-user subject lists and faculty assignments.
+  - name: Faculty
+    description: Faculty profiles linked to user accounts.
+  - name: Students
+    description: Student profiles linked to user accounts.
+  - name: Attendance
+    description: Attendance recording, faculty views and student self-service.
+  - name: Exams
+    description: Exam definitions (admin managed).
+  - name: Results
+    description: Exam results, scoped by role.
+  - name: Notices
+    description: Audience-targeted notices with publish and expiry dates.
+  - name: Fees
+    description: Fee structures, payments and student statements.
+  - name: Assignments
+    description: Assignments, student submissions and grading.
+  - name: Reports
+    description: Aggregate admin and faculty reports.
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: healthCheck
+      summary: Liveness and database check
+      security: []
+      responses:
+        '200':
+          description: Service and database are healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Database is unreachable; service is degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in and receive a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoke the current token
+      responses:
+        '200':
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: currentUser
+      summary: Current authenticated user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Change password and receive a fresh token
+      description: All previously issued tokens are revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password changed; includes a new token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /departments:
+    get:
+      tags: [Departments]
+      operationId: listDepartments
+      summary: List departments
+      description: Any authenticated user.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated departments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Departments]
+      operationId: createDepartment
+      summary: Create a department
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepartmentRequest'
+      responses:
+        '201':
+          description: Department created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /departments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Departments]
+      operationId: getDepartment
+      summary: Get a department
+      description: Any authenticated user.
+      responses:
+        '200':
+          description: Department
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Departments]
+      operationId: updateDepartment
+      summary: Update a department
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentRequest'
+      responses:
+        '200':
+          description: Department updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Departments]
+      operationId: deactivateDepartment
+      summary: Soft-delete a department
+      description: Admin only. Rejected with 409 when active courses reference it.
+      responses:
+        '200':
+          description: Department deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /courses:
+    get:
+      tags: [Courses]
+      operationId: listCourses
+      summary: List courses
+      description: Any authenticated user.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: department_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated courses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Courses]
+      operationId: createCourse
+      summary: Create a course
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCourseRequest'
+      responses:
+        '201':
+          description: Course created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /courses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Courses]
+      operationId: getCourse
+      summary: Get a course
+      description: Any authenticated user.
+      responses:
+        '200':
+          description: Course
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Courses]
+      operationId: updateCourse
+      summary: Update a course
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCourseRequest'
+      responses:
+        '200':
+          description: Course updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Courses]
+      operationId: deactivateCourse
+      summary: Soft-delete a course
+      description: Admin only. Rejected with 409 when active subjects reference it.
+      responses:
+        '200':
+          description: Course deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /subjects:
+    get:
+      tags: [Subjects]
+      operationId: listSubjects
+      summary: List subjects
+      description: |
+        Any authenticated user. Use `faculty_id` to find a faculty member's
+        assigned subjects; faculty and students can instead use
+        `GET /subjects/mine`.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: department_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: semester
+          in: query
+          schema:
+            type: integer
+        - name: faculty_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Only subjects assigned to this faculty member.
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated subjects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Subjects]
+      operationId: createSubject
+      summary: Create a subject
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubjectRequest'
+      responses:
+        '201':
+          description: Subject created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /subjects/mine:
+    get:
+      tags: [Subjects]
+      operationId: listMySubjects
+      summary: Subjects tied to the signed-in user
+      description: |
+        Faculty receive the subjects assigned to them. Students receive the
+        active subjects in their course for their current semester. Admin
+        accounts receive 403.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated subjects for the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /subjects/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Subjects]
+      operationId: getSubject
+      summary: Get a subject
+      description: Any authenticated user.
+      responses:
+        '200':
+          description: Subject
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Subjects]
+      operationId: updateSubject
+      summary: Update a subject
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubjectRequest'
+      responses:
+        '200':
+          description: Subject updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Subjects]
+      operationId: deactivateSubject
+      summary: Soft-delete a subject
+      description: Admin only.
+      responses:
+        '200':
+          description: Subject deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /subjects/{id}/faculty:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Subjects]
+      operationId: listSubjectFaculty
+      summary: Faculty assigned to a subject
+      description: Admin and faculty.
+      responses:
+        '200':
+          description: Assigned faculty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectFacultyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Subjects]
+      operationId: assignSubjectFaculty
+      summary: Assign a faculty member to a subject
+      description: Admin only. Repeating the same assignment is a no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignFacultyRequest'
+      responses:
+        '201':
+          description: Faculty assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectFacultyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /subjects/{id}/faculty/{faculty_id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: faculty_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Subjects]
+      operationId: unassignSubjectFaculty
+      summary: Remove a faculty assignment
+      description: Admin only.
+      responses:
+        '200':
+          description: Assignment removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /faculty:
+    get:
+      tags: [Faculty]
+      operationId: listFaculty
+      summary: List faculty
+      description: Admin only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: department_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated faculty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacultyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Faculty]
+      operationId: createFaculty
+      summary: Create a faculty member and user account
+      description: Admin only. Account and profile are created in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFacultyRequest'
+      responses:
+        '201':
+          description: Faculty created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacultyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /faculty/me:
+    get:
+      tags: [Faculty]
+      operationId: myFacultyProfile
+      summary: Signed-in faculty member's profile
+      description: Faculty only.
+      responses:
+        '200':
+          description: Faculty profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacultyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /faculty/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Faculty]
+      operationId: getFaculty
+      summary: Get a faculty member
+      description: Admin, or a faculty member viewing their own record.
+      responses:
+        '200':
+          description: Faculty member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacultyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Faculty]
+      operationId: updateFaculty
+      summary: Update a faculty member
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFacultyRequest'
+      responses:
+        '200':
+          description: Faculty updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacultyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Faculty]
+      operationId: deactivateFaculty
+      summary: Deactivate a faculty member
+      description: Admin only. Also deactivates the linked user account.
+      responses:
+        '200':
+          description: Faculty deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /students:
+    get:
+      tags: [Students]
+      operationId: listStudents
+      summary: List students
+      description: Admin and faculty.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: department_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: semester
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated students
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Students]
+      operationId: createStudent
+      summary: Create a student and user account
+      description: Admin only. Account and profile are created in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStudentRequest'
+      responses:
+        '201':
+          description: Student created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /students/me:
+    get:
+      tags: [Students]
+      operationId: myStudentProfile
+      summary: Signed-in student's profile
+      description: Student only.
+      responses:
+        '200':
+          description: Student profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /students/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Students]
+      operationId: getStudent
+      summary: Get a student
+      description: Admin or faculty; a student may fetch only their own record.
+      responses:
+        '200':
+          description: Student
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Students]
+      operationId: updateStudent
+      summary: Update a student
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentRequest'
+      responses:
+        '200':
+          description: Student updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Students]
+      operationId: deactivateStudent
+      summary: Deactivate a student
+      description: Admin only. Also deactivates the linked user account.
+      responses:
+        '200':
+          description: Student deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /attendance:
+    get:
+      tags: [Attendance]
+      operationId: listAttendance
+      summary: List attendance records
+      description: Admin and faculty. Faculty see only assigned subjects.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: student_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AttendanceStatus'
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated attendance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Attendance]
+      operationId: recordAttendance
+      summary: Record or update attendance
+      description: |
+        Admin and faculty. Posting the same subject, student and date updates
+        the existing record. The date cannot be in the future.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAttendanceRequest'
+      responses:
+        '201':
+          description: Attendance recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /attendance/me:
+    get:
+      tags: [Attendance]
+      operationId: myAttendance
+      summary: Signed-in student's attendance
+      description: Student only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AttendanceStatus'
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Paginated attendance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /attendance/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Attendance]
+      operationId: getAttendance
+      summary: Get an attendance record
+      description: Admin, assigned faculty, or the owning student.
+      responses:
+        '200':
+          description: Attendance record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Attendance]
+      operationId: updateAttendance
+      summary: Update an attendance record
+      description: Admin or assigned faculty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAttendanceRequest'
+      responses:
+        '200':
+          description: Attendance updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Attendance]
+      operationId: deactivateAttendance
+      summary: Soft-delete an attendance record
+      description: Admin or assigned faculty.
+      responses:
+        '200':
+          description: Attendance deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /exams:
+    get:
+      tags: [Exams]
+      operationId: listExams
+      summary: List exams
+      description: Any authenticated user.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: exam_type
+          in: query
+          schema:
+            $ref: '#/components/schemas/ExamType'
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated exams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Exams]
+      operationId: createExam
+      summary: Create an exam
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExamRequest'
+      responses:
+        '201':
+          description: Exam created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /exams/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Exams]
+      operationId: getExam
+      summary: Get an exam
+      description: Any authenticated user.
+      responses:
+        '200':
+          description: Exam
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Exams]
+      operationId: updateExam
+      summary: Update an exam
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExamRequest'
+      responses:
+        '200':
+          description: Exam updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Exams]
+      operationId: deactivateExam
+      summary: Soft-delete an exam
+      description: Admin only.
+      responses:
+        '200':
+          description: Exam deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /results:
+    get:
+      tags: [Results]
+      operationId: listResults
+      summary: List results
+      description: Admin and faculty. Faculty see only assigned subjects.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: exam_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: student_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Results]
+      operationId: recordResult
+      summary: Record or update a result
+      description: |
+        Admin and faculty. Posting the same exam and student updates the
+        existing result. Marks must not exceed the exam's max_marks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateResultRequest'
+      responses:
+        '201':
+          description: Result recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /results/me:
+    get:
+      tags: [Results]
+      operationId: myResults
+      summary: Signed-in student's results
+      description: Student only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: exam_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Paginated results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /results/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Results]
+      operationId: getResult
+      summary: Get a result
+      description: Admin, assigned faculty, or the owning student.
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Results]
+      operationId: updateResult
+      summary: Update a result
+      description: Admin or assigned faculty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateResultRequest'
+      responses:
+        '200':
+          description: Result updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Results]
+      operationId: deactivateResult
+      summary: Soft-delete a result
+      description: Admin or assigned faculty.
+      responses:
+        '200':
+          description: Result deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notices:
+    get:
+      tags: [Notices]
+      operationId: listNotices
+      summary: List notices
+      description: |
+        Any authenticated user. Non-admins see only active, published,
+        unexpired notices addressed to ALL or their own role.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: audience
+          in: query
+          schema:
+            $ref: '#/components/schemas/NoticeAudience'
+        - $ref: '#/components/parameters/IncludeInactive'
+        - name: include_expired
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Admin only.
+      responses:
+        '200':
+          description: Paginated notices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoticeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Notices]
+      operationId: createNotice
+      summary: Create a notice
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNoticeRequest'
+      responses:
+        '201':
+          description: Notice created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoticeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /notices/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Notices]
+      operationId: getNotice
+      summary: Get a notice
+      description: Any authenticated user who may see it.
+      responses:
+        '200':
+          description: Notice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoticeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Notices]
+      operationId: updateNotice
+      summary: Update a notice
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNoticeRequest'
+      responses:
+        '200':
+          description: Notice updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoticeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Notices]
+      operationId: deactivateNotice
+      summary: Soft-delete a notice
+      description: Admin only.
+      responses:
+        '200':
+          description: Notice deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fees:
+    get:
+      tags: [Fees]
+      operationId: listFeeStructures
+      summary: List fee structures
+      description: Any authenticated user. Students are limited to their own course.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: academic_year
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated fee structures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeStructureListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Fees]
+      operationId: createFeeStructure
+      summary: Create a fee structure
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFeeStructureRequest'
+      responses:
+        '201':
+          description: Fee structure created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeStructureResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /fees/me:
+    get:
+      tags: [Fees]
+      operationId: myFeeStatements
+      summary: Signed-in student's fee statements
+      description: Student only. Includes paid amount and outstanding balance.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: academic_year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated fee statements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeStatementListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fees/me/payments:
+    get:
+      tags: [Fees]
+      operationId: myFeePayments
+      summary: Signed-in student's fee payments
+      description: Student only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: academic_year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated fee payments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeePaymentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fees/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Fees]
+      operationId: getFeeStructure
+      summary: Get a fee structure
+      description: Any authenticated user; students only for their own course.
+      responses:
+        '200':
+          description: Fee structure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeStructureResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Fees]
+      operationId: updateFeeStructure
+      summary: Update a fee structure
+      description: Admin only. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFeeStructureRequest'
+      responses:
+        '200':
+          description: Fee structure updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeStructureResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Fees]
+      operationId: deactivateFeeStructure
+      summary: Soft-delete a fee structure
+      description: Admin only. Rejected with 409 when active payments exist.
+      responses:
+        '200':
+          description: Fee structure deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /fees/{id}/payments:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Fees]
+      operationId: listFeePayments
+      summary: List payments for a fee structure
+      description: Admin only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: student_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated payments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeePaymentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Fees]
+      operationId: recordFeePayment
+      summary: Record a fee payment
+      description: |
+        Admin only. The student must be enrolled in the fee's course and the
+        amount must not exceed the outstanding balance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFeePaymentRequest'
+      responses:
+        '201':
+          description: Payment recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeePaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /fees/{id}/payments/{payment_id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: payment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Fees]
+      operationId: deactivateFeePayment
+      summary: Soft-delete a fee payment
+      description: Admin only.
+      responses:
+        '200':
+          description: Payment deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /assignments:
+    get:
+      tags: [Assignments]
+      operationId: listAssignments
+      summary: List assignments
+      description: |
+        Any authenticated user. Admins see all; faculty see assigned subjects;
+        students see their own course.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Assignments]
+      operationId: createAssignment
+      summary: Create an assignment
+      description: |
+        Admin and faculty. Faculty create under their own identity; admins
+        must supply `faculty_id`, and that faculty must teach the subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssignmentRequest'
+      responses:
+        '201':
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /assignments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Assignments]
+      operationId: getAssignment
+      summary: Get an assignment
+      description: Any authenticated user with access to the subject/course.
+      responses:
+        '200':
+          description: Assignment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Assignments]
+      operationId: updateAssignment
+      summary: Update an assignment
+      description: Admin or faculty assigned to the subject. Partial update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAssignmentRequest'
+      responses:
+        '200':
+          description: Assignment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Assignments]
+      operationId: deactivateAssignment
+      summary: Soft-delete an assignment
+      description: Admin or faculty assigned to the subject.
+      responses:
+        '200':
+          description: Assignment deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /assignments/{id}/submissions:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Assignments]
+      operationId: listSubmissions
+      summary: List submissions for an assignment
+      description: Admin or assigned faculty.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: student_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Paginated submissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Assignments]
+      operationId: submitAssignment
+      summary: Submit an assignment
+      description: |
+        Student only. Re-submitting replaces the content and clears the grade.
+        Submission is rejected after the due date.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubmissionRequest'
+      responses:
+        '201':
+          description: Assignment submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /assignments/{id}/submissions/{submission_id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: submission_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      tags: [Assignments]
+      operationId: gradeSubmission
+      summary: Grade a submission
+      description: Admin or assigned faculty. Marks must fit the assignment's max_marks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GradeSubmissionRequest'
+      responses:
+        '200':
+          description: Submission graded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      tags: [Assignments]
+      operationId: deactivateSubmission
+      summary: Soft-delete a submission
+      description: Admin or assigned faculty.
+      responses:
+        '200':
+          description: Submission deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /submissions/me:
+    get:
+      tags: [Assignments]
+      operationId: mySubmissions
+      summary: Signed-in student's submissions
+      description: Student only.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated submissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /reports/overview:
+    get:
+      tags: [Reports]
+      operationId: overviewReport
+      summary: Active record counts
+      description: Admin only.
+      responses:
+        '200':
+          description: Overview report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverviewReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/attendance:
+    get:
+      tags: [Reports]
+      operationId: attendanceReport
+      summary: Attendance percentages by subject
+      description: |
+        Admin and faculty (assigned subjects). PRESENT and LATE count as
+        attended. Returns an unpaginated array.
+      parameters:
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: department_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Attendance report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /reports/results:
+    get:
+      tags: [Reports]
+      operationId: resultsReport
+      summary: Result statistics by exam
+      description: |
+        Admin and faculty (assigned subjects). Pass rate uses 40% of
+        max_marks. Returns an unpaginated array.
+      parameters:
+        - name: exam_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Results report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultsReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/fees:
+    get:
+      tags: [Reports]
+      operationId: feesReport
+      summary: Expected, collected and outstanding fees
+      description: Admin only. Returns an unpaginated array.
+      parameters:
+        - name: course_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: academic_year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Fees report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        format: int64
+        default: 1
+        minimum: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        format: int64
+        default: 20
+        minimum: 1
+        maximum: 100
+    Search:
+      name: search
+      in: query
+      schema:
+        type: string
+      description: Case-insensitive partial match. LIKE wildcards are escaped.
+    IncludeInactive:
+      name: include_inactive
+      in: query
+      schema:
+        type: boolean
+        default: false
+      description: Admin only; non-admin callers ignore it.
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, query string or path parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing, invalid or revoked token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated but not allowed to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Unique constraint or related-record conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationFailed:
+      description: Business-rule validation failed (422)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ApiEnvelope:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [success, message, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Validation failed
+        error:
+          type: string
+          example: credits must be between 1 and 10
+    EmptyResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              nullable: true
+              description: Always null for delete/logout responses.
+
+    Role:
+      type: string
+      enum: [ADMIN, FACULTY, STUDENT]
+    AttendanceStatus:
+      type: string
+      enum: [PRESENT, ABSENT, LATE, EXCUSED]
+    ExamType:
+      type: string
+      enum: [QUIZ, MIDTERM, FINAL, PRACTICAL]
+    NoticeAudience:
+      type: string
+      enum: [ALL, STUDENTS, FACULTY, ADMIN]
+    PaymentMethod:
+      type: string
+      enum: [CASH, CARD, UPI, BANK_TRANSFER]
+
+    HealthData:
+      type: object
+      required: [status, database, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        database:
+          type: string
+          enum: [up, down]
+        version:
+          type: string
+    HealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/HealthData'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          maxLength: 512
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    User:
+      type: object
+      required: [id, email, role, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    LoginData:
+      type: object
+      required: [access_token, token_type, expires_at, user]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/User'
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/LoginData'
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/User'
+
+    Department:
+      type: object
+      required:
+        [id, name, code, description, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        code:
+          type: string
+        description:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateDepartmentRequest:
+      type: object
+      required: [name, code]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+    UpdateDepartmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        is_active:
+          type: boolean
+    DepartmentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Department'
+    PaginatedDepartments:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Department'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    DepartmentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedDepartments'
+
+    Course:
+      type: object
+      required:
+        - id
+        - department_id
+        - department_name
+        - name
+        - code
+        - duration_semesters
+        - description
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        department_id:
+          type: string
+          format: uuid
+        department_name:
+          type: string
+        name:
+          type: string
+        code:
+          type: string
+        duration_semesters:
+          type: integer
+        description:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateCourseRequest:
+      type: object
+      required: [department_id, name, code, duration_semesters]
+      properties:
+        department_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 150
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        duration_semesters:
+          type: integer
+          minimum: 1
+          maximum: 12
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+    UpdateCourseRequest:
+      type: object
+      properties:
+        department_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 150
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        duration_semesters:
+          type: integer
+          minimum: 1
+          maximum: 12
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        is_active:
+          type: boolean
+    CourseResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Course'
+    PaginatedCourses:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Course'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    CourseListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedCourses'
+
+    Subject:
+      type: object
+      required:
+        - id
+        - course_id
+        - course_name
+        - department_id
+        - department_name
+        - name
+        - code
+        - semester
+        - credits
+        - description
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        course_name:
+          type: string
+        department_id:
+          type: string
+          format: uuid
+        department_name:
+          type: string
+        name:
+          type: string
+        code:
+          type: string
+        semester:
+          type: integer
+        credits:
+          type: integer
+        description:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateSubjectRequest:
+      type: object
+      required: [course_id, name, code, semester, credits]
+      properties:
+        course_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 150
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        semester:
+          type: integer
+          minimum: 1
+        credits:
+          type: integer
+          minimum: 1
+          maximum: 10
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+    UpdateSubjectRequest:
+      type: object
+      properties:
+        course_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 150
+        code:
+          type: string
+          minLength: 2
+          maxLength: 20
+        semester:
+          type: integer
+          minimum: 1
+        credits:
+          type: integer
+          minimum: 1
+          maximum: 10
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        is_active:
+          type: boolean
+    AssignFacultyRequest:
+      type: object
+      required: [faculty_id]
+      properties:
+        faculty_id:
+          type: string
+          format: uuid
+    SubjectResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Subject'
+    PaginatedSubjects:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subject'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    SubjectListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedSubjects'
+    SubjectFaculty:
+      type: object
+      required:
+        - subject_id
+        - faculty_id
+        - employee_id
+        - first_name
+        - last_name
+        - email
+        - department_id
+        - department_name
+        - assigned_at
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        faculty_id:
+          type: string
+          format: uuid
+        employee_id:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+        department_id:
+          type: string
+          format: uuid
+        department_name:
+          type: string
+        assigned_at:
+          type: string
+          format: date-time
+    SubjectFacultyResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/SubjectFaculty'
+    SubjectFacultyListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubjectFaculty'
+
+    Faculty:
+      type: object
+      required:
+        - id
+        - user_id
+        - email
+        - department_id
+        - department_name
+        - employee_id
+        - first_name
+        - last_name
+        - phone
+        - designation
+        - joined_on
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        department_id:
+          type: string
+          format: uuid
+        department_name:
+          type: string
+        employee_id:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        designation:
+          type: string
+        joined_on:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateFacultyRequest:
+      type: object
+      required:
+        - email
+        - password
+        - department_id
+        - employee_id
+        - first_name
+        - last_name
+        - designation
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        department_id:
+          type: string
+          format: uuid
+        employee_id:
+          type: string
+          minLength: 2
+          maxLength: 20
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        phone:
+          type: string
+          nullable: true
+        designation:
+          type: string
+          maxLength: 100
+        joined_on:
+          type: string
+          format: date
+          nullable: true
+    UpdateFacultyRequest:
+      type: object
+      properties:
+        department_id:
+          type: string
+          format: uuid
+        employee_id:
+          type: string
+          minLength: 2
+          maxLength: 20
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        phone:
+          type: string
+          nullable: true
+        designation:
+          type: string
+          maxLength: 100
+        joined_on:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+    FacultyResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Faculty'
+    PaginatedFaculty:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Faculty'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    FacultyListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedFaculty'
+
+    Student:
+      type: object
+      required:
+        - id
+        - user_id
+        - email
+        - course_id
+        - course_name
+        - department_id
+        - department_name
+        - enrollment_no
+        - first_name
+        - last_name
+        - phone
+        - date_of_birth
+        - current_semester
+        - admission_year
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        course_id:
+          type: string
+          format: uuid
+        course_name:
+          type: string
+        department_id:
+          type: string
+          format: uuid
+        department_name:
+          type: string
+        enrollment_no:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        current_semester:
+          type: integer
+        admission_year:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateStudentRequest:
+      type: object
+      required:
+        - email
+        - password
+        - course_id
+        - enrollment_no
+        - first_name
+        - last_name
+        - current_semester
+        - admission_year
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        course_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+          minLength: 2
+          maxLength: 20
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        phone:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        current_semester:
+          type: integer
+          minimum: 1
+        admission_year:
+          type: integer
+          minimum: 1950
+    UpdateStudentRequest:
+      type: object
+      properties:
+        course_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+          minLength: 2
+          maxLength: 20
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        phone:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        current_semester:
+          type: integer
+          minimum: 1
+        admission_year:
+          type: integer
+          minimum: 1950
+        is_active:
+          type: boolean
+    StudentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Student'
+    PaginatedStudents:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Student'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    StudentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedStudents'
+
+    Attendance:
+      type: object
+      required:
+        - id
+        - subject_id
+        - subject_name
+        - subject_code
+        - student_id
+        - enrollment_no
+        - student_first_name
+        - student_last_name
+        - marked_by
+        - attendance_date
+        - status
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+        subject_name:
+          type: string
+        subject_code:
+          type: string
+        student_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+        student_first_name:
+          type: string
+        student_last_name:
+          type: string
+        marked_by:
+          type: string
+          format: uuid
+          nullable: true
+        attendance_date:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/AttendanceStatus'
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateAttendanceRequest:
+      type: object
+      required: [subject_id, student_id, attendance_date, status]
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+          format: uuid
+        attendance_date:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/AttendanceStatus'
+    UpdateAttendanceRequest:
+      type: object
+      properties:
+        attendance_date:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/AttendanceStatus'
+        is_active:
+          type: boolean
+    AttendanceResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Attendance'
+    PaginatedAttendance:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attendance'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    AttendanceListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedAttendance'
+
+    Exam:
+      type: object
+      required:
+        - id
+        - subject_id
+        - subject_name
+        - subject_code
+        - course_id
+        - course_name
+        - name
+        - exam_type
+        - exam_date
+        - max_marks
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+        subject_name:
+          type: string
+        subject_code:
+          type: string
+        course_id:
+          type: string
+          format: uuid
+        course_name:
+          type: string
+        name:
+          type: string
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        exam_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateExamRequest:
+      type: object
+      required: [subject_id, name, exam_type, exam_date, max_marks]
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        exam_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+          minimum: 1
+          maximum: 1000
+    UpdateExamRequest:
+      type: object
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        exam_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        is_active:
+          type: boolean
+    ExamResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Exam'
+    PaginatedExams:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Exam'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    ExamListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedExams'
+
+    Result:
+      type: object
+      required:
+        - id
+        - exam_id
+        - exam_name
+        - exam_type
+        - subject_id
+        - subject_name
+        - student_id
+        - student_user_id
+        - enrollment_no
+        - student_first_name
+        - student_last_name
+        - marks_obtained
+        - max_marks
+        - grade
+        - recorded_by
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        exam_id:
+          type: string
+          format: uuid
+        exam_name:
+          type: string
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        subject_id:
+          type: string
+          format: uuid
+        subject_name:
+          type: string
+        student_id:
+          type: string
+          format: uuid
+        student_user_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+        student_first_name:
+          type: string
+        student_last_name:
+          type: string
+        marks_obtained:
+          type: integer
+        max_marks:
+          type: integer
+        grade:
+          type: string
+          nullable: true
+        recorded_by:
+          type: string
+          format: uuid
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateResultRequest:
+      type: object
+      required: [exam_id, student_id, marks_obtained]
+      properties:
+        exam_id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+          format: uuid
+        marks_obtained:
+          type: integer
+          minimum: 0
+        grade:
+          type: string
+          nullable: true
+          maxLength: 10
+    UpdateResultRequest:
+      type: object
+      properties:
+        marks_obtained:
+          type: integer
+          minimum: 0
+        grade:
+          type: string
+          nullable: true
+          maxLength: 10
+        is_active:
+          type: boolean
+    ResultResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Result'
+    PaginatedResults:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Result'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    ResultListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedResults'
+
+    Notice:
+      type: object
+      required:
+        - id
+        - title
+        - body
+        - audience
+        - created_by
+        - created_by_email
+        - published_at
+        - expires_at
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        audience:
+          $ref: '#/components/schemas/NoticeAudience'
+        created_by:
+          type: string
+          format: uuid
+        created_by_email:
+          type: string
+          format: email
+        published_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateNoticeRequest:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+        audience:
+          $ref: '#/components/schemas/NoticeAudience'
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    UpdateNoticeRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+        audience:
+          $ref: '#/components/schemas/NoticeAudience'
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_active:
+          type: boolean
+    NoticeResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Notice'
+    PaginatedNotices:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notice'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    NoticeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedNotices'
+
+    FeeStructure:
+      type: object
+      required:
+        - id
+        - course_id
+        - course_name
+        - academic_year
+        - name
+        - amount
+        - due_date
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        course_name:
+          type: string
+        academic_year:
+          type: integer
+        name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+          description: Whole currency units.
+        due_date:
+          type: string
+          format: date
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateFeeStructureRequest:
+      type: object
+      required: [course_id, academic_year, name, amount, due_date]
+      properties:
+        course_id:
+          type: string
+          format: uuid
+        academic_year:
+          type: integer
+        name:
+          type: string
+          maxLength: 150
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        due_date:
+          type: string
+          format: date
+    UpdateFeeStructureRequest:
+      type: object
+      properties:
+        course_id:
+          type: string
+          format: uuid
+        academic_year:
+          type: integer
+        name:
+          type: string
+          maxLength: 150
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        due_date:
+          type: string
+          format: date
+        is_active:
+          type: boolean
+    FeeStructureResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/FeeStructure'
+    PaginatedFeeStructures:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeeStructure'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    FeeStructureListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedFeeStructures'
+
+    FeePayment:
+      type: object
+      required:
+        - id
+        - fee_structure_id
+        - student_id
+        - enrollment_no
+        - student_first_name
+        - student_last_name
+        - amount
+        - paid_on
+        - method
+        - reference
+        - recorded_by
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        fee_structure_id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+        student_first_name:
+          type: string
+        student_last_name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        paid_on:
+          type: string
+          format: date
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        reference:
+          type: string
+          nullable: true
+        recorded_by:
+          type: string
+          format: uuid
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateFeePaymentRequest:
+      type: object
+      required: [student_id, amount, paid_on, method]
+      properties:
+        student_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        paid_on:
+          type: string
+          format: date
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        reference:
+          type: string
+          nullable: true
+          maxLength: 100
+    FeePaymentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/FeePayment'
+    PaginatedFeePayments:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeePayment'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    FeePaymentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedFeePayments'
+
+    FeeStatement:
+      type: object
+      required:
+        - fee_structure_id
+        - course_id
+        - course_name
+        - academic_year
+        - name
+        - amount
+        - due_date
+        - paid_amount
+        - balance
+      properties:
+        fee_structure_id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        course_name:
+          type: string
+        academic_year:
+          type: integer
+        name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        due_date:
+          type: string
+          format: date
+        paid_amount:
+          type: integer
+          format: int64
+        balance:
+          type: integer
+          format: int64
+    PaginatedFeeStatements:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeeStatement'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    FeeStatementListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedFeeStatements'
+
+    Assignment:
+      type: object
+      required:
+        - id
+        - subject_id
+        - subject_name
+        - subject_code
+        - course_id
+        - faculty_id
+        - faculty_first_name
+        - faculty_last_name
+        - title
+        - description
+        - due_date
+        - max_marks
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+        subject_name:
+          type: string
+        subject_code:
+          type: string
+        course_id:
+          type: string
+          format: uuid
+        faculty_id:
+          type: string
+          format: uuid
+        faculty_first_name:
+          type: string
+        faculty_last_name:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        due_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateAssignmentRequest:
+      type: object
+      required: [subject_id, title, description, due_date]
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        faculty_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when an admin creates on behalf of a faculty member.
+        title:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+          maxLength: 5000
+        due_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 1000
+    UpdateAssignmentRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+          maxLength: 5000
+        due_date:
+          type: string
+          format: date
+        max_marks:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 1000
+        is_active:
+          type: boolean
+    AssignmentResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Assignment'
+    PaginatedAssignments:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assignment'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    AssignmentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedAssignments'
+
+    Submission:
+      type: object
+      required:
+        - id
+        - assignment_id
+        - assignment_title
+        - student_id
+        - student_user_id
+        - enrollment_no
+        - student_first_name
+        - student_last_name
+        - content
+        - submitted_at
+        - marks_obtained
+        - graded_by
+        - graded_at
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        assignment_title:
+          type: string
+        student_id:
+          type: string
+          format: uuid
+        student_user_id:
+          type: string
+          format: uuid
+        enrollment_no:
+          type: string
+        student_first_name:
+          type: string
+        student_last_name:
+          type: string
+        content:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+        marks_obtained:
+          type: integer
+          nullable: true
+        graded_by:
+          type: string
+          format: uuid
+          nullable: true
+        graded_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateSubmissionRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          maxLength: 10000
+    GradeSubmissionRequest:
+      type: object
+      properties:
+        marks_obtained:
+          type: integer
+          nullable: true
+          minimum: 0
+        is_active:
+          type: boolean
+    SubmissionResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Submission'
+    PaginatedSubmissions:
+      type: object
+      required: [items, page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Submission'
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    SubmissionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaginatedSubmissions'
+
+    OverviewReport:
+      type: object
+      required: [departments, courses, subjects, faculty, students, notices, active_assignments]
+      properties:
+        departments:
+          type: integer
+          format: int64
+        courses:
+          type: integer
+          format: int64
+        subjects:
+          type: integer
+          format: int64
+        faculty:
+          type: integer
+          format: int64
+        students:
+          type: integer
+          format: int64
+        notices:
+          type: integer
+          format: int64
+        active_assignments:
+          type: integer
+          format: int64
+    OverviewReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/OverviewReport'
+
+    AttendanceReportRow:
+      type: object
+      required:
+        - subject_id
+        - subject_code
+        - subject_name
+        - course_name
+        - total
+        - present
+        - absent
+        - late
+        - excused
+        - attendance_percent
+      properties:
+        subject_id:
+          type: string
+          format: uuid
+        subject_code:
+          type: string
+        subject_name:
+          type: string
+        course_name:
+          type: string
+        total:
+          type: integer
+          format: int64
+        present:
+          type: integer
+          format: int64
+        absent:
+          type: integer
+          format: int64
+        late:
+          type: integer
+          format: int64
+        excused:
+          type: integer
+          format: int64
+        attendance_percent:
+          type: number
+          format: double
+    AttendanceReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AttendanceReportRow'
+
+    ResultsReportRow:
+      type: object
+      required:
+        - exam_id
+        - exam_name
+        - subject_id
+        - subject_code
+        - subject_name
+        - students_graded
+        - average_marks
+        - highest_marks
+        - lowest_marks
+        - max_marks
+        - pass_rate
+      properties:
+        exam_id:
+          type: string
+          format: uuid
+        exam_name:
+          type: string
+        subject_id:
+          type: string
+          format: uuid
+        subject_code:
+          type: string
+        subject_name:
+          type: string
+        students_graded:
+          type: integer
+          format: int64
+        average_marks:
+          type: number
+          format: double
+        highest_marks:
+          type: integer
+        lowest_marks:
+          type: integer
+        max_marks:
+          type: integer
+        pass_rate:
+          type: number
+          format: double
+    ResultsReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ResultsReportRow'
+
+    FeeReportRow:
+      type: object
+      required:
+        - fee_structure_id
+        - name
+        - course_name
+        - academic_year
+        - amount
+        - collected
+        - outstanding
+        - payment_count
+      properties:
+        fee_structure_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        course_name:
+          type: string
+        academic_year:
+          type: integer
+        amount:
+          type: integer
+          format: int64
+        collected:
+          type: integer
+          format: int64
+        outstanding:
+          type: integer
+          format: int64
+        payment_count:
+          type: integer
+          format: int64
+    FeeReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/FeeReportRow'

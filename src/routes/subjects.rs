@@ -22,6 +22,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
             "/subjects",
             get(h::list).merge(post(h::create).route_layer(admin.clone())),
         )
+        .route("/subjects/mine", get(h::mine))
         .route(
             "/subjects/{id}",
             get(h::get_one).merge(put(h::update).delete(h::remove).route_layer(admin.clone())),
