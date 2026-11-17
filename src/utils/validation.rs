@@ -129,3 +129,34 @@ mod text_tests {
         }
     }
 }
+
+/// Strips spaces and dashes; allows an optional leading '+' then 7 to 15 digits.
+pub fn clean_phone(field: &str, raw: &str) -> AppResult<String> {
+    let t: String = raw.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    let digits = t.strip_prefix('+').unwrap_or(&t);
+    let ok = (7..=15).contains(&digits.len()) && digits.chars().all(|c| c.is_ascii_digit());
+    if ok {
+        Ok(t)
+    } else {
+        Err(AppError::Validation(format!(
+            "{field} must be 7 to 15 digits, optionally starting with '+'"
+        )))
+    }
+}
+
+#[cfg(test)]
+mod phone_tests {
+    use super::*;
+
+    #[test]
+    fn phone_rules() {
+        assert_eq!(
+            clean_phone("p", "+91 98765-43210").unwrap(),
+            "+919876543210"
+        );
+        assert_eq!(clean_phone("p", "9876543210").unwrap(), "9876543210");
+        for bad in ["", "12345", "abc1234567", "+", "98765432101234567"] {
+            assert!(clean_phone("p", bad).is_err(), "{bad} should be invalid");
+        }
+    }
+}
