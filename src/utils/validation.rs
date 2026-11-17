@@ -130,6 +130,46 @@ mod text_tests {
     }
 }
 
+/// Uppercases and checks a value against an allow-list.
+pub fn clean_choice(field: &str, raw: &str, allowed: &[&str]) -> AppResult<String> {
+    let value = raw.trim().to_uppercase();
+    if allowed.contains(&value.as_str()) {
+        Ok(value)
+    } else {
+        Err(AppError::Validation(format!(
+            "{field} must be one of: {}",
+            allowed.join(", ")
+        )))
+    }
+}
+
+/// None stays None; a provided choice must be in the allow-list.
+pub fn clean_optional_choice(
+    field: &str,
+    raw: Option<&str>,
+    allowed: &[&str],
+) -> AppResult<Option<String>> {
+    raw.map(|v| clean_choice(field, v, allowed)).transpose()
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::*;
+
+    #[test]
+    fn choice_rules() {
+        assert_eq!(
+            clean_choice("status", " present ", &["PRESENT", "ABSENT"]).unwrap(),
+            "PRESENT"
+        );
+        assert!(clean_choice("status", "UNKNOWN", &["PRESENT", "ABSENT"]).is_err());
+        assert_eq!(
+            clean_optional_choice("status", None, &["PRESENT"]).unwrap(),
+            None
+        );
+    }
+}
+
 /// Strips spaces and dashes; allows an optional leading '+' then 7 to 15 digits.
 pub fn clean_phone(field: &str, raw: &str) -> AppResult<String> {
     let t: String = raw.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
